@@ -1,25 +1,39 @@
-#!/usr/bin/env python
-
+#!/usr/bin/env python2.7
+# vim: set fileencoding: utf-8
 '''
 Test network latency by creating TCP sockets and timing the 3-way handshake
 
 compat-check: 2.6 2.7
 
-notes: expert mode is a work in progress, but not using it shouldn't affect 
+notes: expert mode is a work in progress, but not using it shouldn't affect
 normal user mode.
 
-This is free software, licensed under the GPL v3.
+TODO:
+    * add flag to output source ip and port for each connection
+    * microsecond timestamps on output line
+    * connect timeout flag
+    * companion tool for generating graphs from tcpping data
+    * realtime option in expert mode
+
+NOTES:
+    * Modified to ensure a DNS lookup is done every time
 '''
 
 __AUTHOR__ = 'Peter Downs <padowns@gmail.com>'
-__VERSION__ = '0.02.01'
+__VERSION__ = '0.02.03'
 __DATE__ = '2016-02-26'
 
+import platform
+__major_version, __minor_version = platform.python_version().split(".")[:2]
+
+from datetime import datetime
 import signal
 import sys
 import os
 import socket
+import select
 import time
+import timeit
 import string
 import getopt
 import struct
@@ -64,21 +78,29 @@ def print_statistics():
     if (len(times) == 0):
         print('No times were recorded.')
         return 0
-    print('%d connections attempted, %d complete, %d failed, %.2f%% success rate, time %f ms') % (total_conns, len(times), total_conns-len(times), float(len(times)/total_conns*100), sum(times))
+    print('%d connections attempted, %d complete, %d failed, %.2f%% success rate, time %f ms') % (total_conns, len(times), total_conns-len(times), float(len(times))/float(total_conns)*100.0, sum(times))
     print('rtt min/avg/max/mdev = %f/%f/%f/%f ms') % (min(times), sum(times)/len(times), max(times), stddev(times))
 
 signal.signal(signal.SIGINT, signal_handler)
 
 def usage():
 	print('tcpping version %s (c)%s %s') % (__VERSION__, __DATE__, __AUTHOR__)
-	print('usage: tcpping [ -h ] [ -c <count> ] [ -r <rate> ] -d <host> -p <port> [ -x ]')
+	print('usage: tcpping [ -h ] [ -c <count> ] [ -r <rate> ] -d <host> -p <port> [ -m ] [ -s ] [ -t <timeout> ] [ -x ]')
 	print('')
+        print(' short options:')
+        print('         -h - display this help message')
+        print('         -m - output timestamps with microsecond precision - useful for comparing with tcpdump or strace output')
+        print('         -s - output source ip and port per connection')
+        print('         -x - expert mode; require root')
+        print('')
 	print('	long options:')
-	print('		--help')
-	print('		--dest | --destination <host>')
-	print('		--port <port>')
-	print('		--count <count>')
-	print('		--rate <rate>')
+	print('	        --help')
+	print('	        --dest | --destination <host>')
+	print('	        --port <port>')
+	print('	        --count <count>')
+	print('         --rate <rate>')
+        print('         --microseconds')
+        print('         --timeout <timeout>')
         print('         --expert')
 	print('')
 	print('	host	- host or ip address to connect to')
@@ -86,6 +108,8 @@ def usage():
 	print('	count	- number of connections to try.  Default is infinite')
 	print('	rate	- sleep time (in seconds) between connections.  Default is 1.')
 	print('           Use a floating point number for microsecond precision (e.g. 0.200 for every 200ms)')
+        print(' timeout - connection timeout in seconds')
+        print(' microseconds - output timestamps with microsecond precision')
         print(' expert  - enable expert mode; requires root')
 	print('')
 
@@ -96,13 +120,17 @@ def main(argv):
         __EXPERT__ = False
 
 	# Defaults
+        TIMEOUT = None
+        SRC = None
+        SRC_FLAG = 0
 	DEST = None
 	PORT = None
 	COUNT = -1	# ping until interrupted
 	RATE = 1	# ping every second
+        MS_FLAG = 0
 	
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], "c:hd:p:r:x", ["count=", "help", "dest=", "destination=", "rate=", "port=", "expert"])
+            opts, args = getopt.getopt(sys.argv[1:], "c:hd:mp:r:st:x", ["count=", "help", "dest=", "destination=", "microseconds", "rate=", "port=", "source", "src", "timeout=", "expert"])
 	except getopt.GetoptError:
 		usage()
 		sys.exit(2)
@@ -113,8 +141,15 @@ def main(argv):
 			RATE = a
 		if o in ("-d", "--dest", "--destination"):
 			DEST = a
+                if o in ("-m", "--microseconds"):
+                        MS_FLAG = 1
 		if o in ("-p", "--port"):
 			PORT = a
+                if o in ("-s", "--source", "--src"):
+                        SRC_FLAG = 1
+                if o in ("-t", "--timeout"):
+                        TIMEOUT = float(a)
+                        socket.setdefaulttimeout(TIMEOUT)
 		if o in ("-h", "--help"):
 			usage()
 			sys.exit(1)
@@ -132,11 +167,6 @@ def main(argv):
         if (float(RATE) < 0.0001):
                 print('Connection rate should be greater than 0.0001 sec')
                 sys.exit(3)
-
-        #port = socket.getservbyname(PORT)
-        hostname = socket.gethostname()
-        src_ip = socket.gethostbyname(hostname)
-        dst_ip = socket.gethostbyname(DEST)
 
         if (__EXPERT__):
             #Initialize TCP and IP header fields
@@ -177,20 +207,46 @@ def main(argv):
 
 
 	while int(total_conns) != int(COUNT):
+            #port = socket.getservbyname(PORT)
+            hostname = socket.gethostname()
+            src_ip = socket.gethostbyname(hostname)
+            dst_ip = socket.gethostbyname(DEST)
+
             total_conns += 1
+            seq = total_conns
+            src_port = "-1"
+            dst_port = PORT
             if(not __EXPERT__):
-                DATE = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
+                if MS_FLAG:
+                    date = datetime.now().strftime("%H:%M:%S.%f")
+                else:
+                    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 except socket.error, msg:
-                    print('Unable to obtain a socket.')
+                    print('Unable to obtain a socket (%s)') % (msg)
                     sys.exit(4)
 
+                begin_time = time.time()
                 try:
-                        begin_time = time.time()
                         s.connect((DEST, int(PORT)))
+                        if TIMEOUT != None:
+                            fd=s.fileno()
+                            rlist, wlist, xlist = select.select([],[fd],[],TIMEOUT)
+                            if wlist == []:
+                                raise socket.timeout
+                except socket.timeout, msg:
 			end_time = time.time()
+                        connect_time = (end_time - begin_time) * 1000
+                        RESULT = "%f ms Connection Failed (%s)" % (connect_time, msg)
+                except socket.error, msg:
+                        RESULT = '0ms Connection Failed (%s)' % (msg)
+                else:
+			end_time = time.time()
+
+                        src_ip, src_port = s.getsockname()
+                        dst_ip, dst_port = s.getpeername()
 
                         connect_time = (end_time - begin_time) * 1000
                         if (connect_time == 0.000000):
@@ -198,12 +254,15 @@ def main(argv):
                         else:
                             times.append(connect_time)
                             RESULT = "%f ms Connection Succeeded" % (connect_time)
-			
-                except:
-                        RESULT = 'Connection Failed'
+                        s.shutdown(socket.SHUT_RDWR)
+                        s.close()
 
-                output = DATE + " " + DEST + ":" + str(PORT) + " (" + dst_ip + ":" + PORT + ") seq=" + str(total_conns) + " " + RESULT
-                print("%s") % (output)
+                if SRC_FLAG:
+                    output_fmt = "%(date)s %(src_ip)s:%(src_port)s %(DEST)s:%(PORT)s (%(dst_ip)s:%(dst_port)s) seq=%(seq)s %(RESULT)s"
+                else:
+                    output_fmt = "%(date)s %(DEST)s:%(PORT)s (%(dst_ip)s:%(dst_port)s) seq=%(seq)s %(RESULT)s"
+                print(output_fmt) % vars()
+                sys.stdout.flush()
                 time.sleep(float(RATE))
 
             else:
