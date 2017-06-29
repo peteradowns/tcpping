@@ -78,13 +78,14 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def usage():
 	print('tcpping version %s (c)%s %s') % (__VERSION__, __DATE__, __AUTHOR__)
-	print('usage: tcpping [ -h ] [ -c <count> ] [ -r <rate> ] -d <host> -p <port> [ -m ] [ -s ] [ -t <timeout> ] [ -x ]')
+	print('usage: tcpping [ -h ] [ -c <count> ] [ -r <rate> ] -d <host> -p <port> [ -m ] [ -s ] [ -t <timeout> ] [ -x ] [ -v ]')
 	print('')
         print(' short options:')
         print('         -h - display this help message')
         print('         -m - output timestamps with microsecond precision - useful for comparing with tcpdump or strace output')
         print('         -s - output source ip and port per connection')
         print('         -x - expert mode; require root')
+        print('         -v - print version and exit')
         print('')
 	print('	long options:')
 	print('	        --help')
@@ -95,6 +96,7 @@ def usage():
         print('         --microseconds')
         print('         --timeout <timeout>')
         print('         --expert')
+        print('         --version')
 	print('')
 	print('	host	- host or ip address to connect to')
 	print('	port	- port to connect to on <host>')
@@ -104,6 +106,7 @@ def usage():
         print(' timeout - connection timeout in seconds')
         print(' microseconds - output timestamps with microsecond precision')
         print(' expert  - enable expert mode; requires root')
+        print(' version - print version and exit')
 	print('')
 
 def main(argv):
@@ -123,7 +126,7 @@ def main(argv):
         MS_FLAG = 0
 	
 	try:
-            opts, args = getopt.getopt(sys.argv[1:], "c:hd:mp:r:st:x", ["count=", "help", "dest=", "destination=", "microseconds", "rate=", "port=", "source", "src", "timeout=", "expert"])
+            opts, args = getopt.getopt(sys.argv[1:], "c:hd:mp:r:st:xv", ["count=", "help", "dest=", "destination=", "microseconds", "rate=", "port=", "source", "src", "timeout=", "expert", "version"])
 	except getopt.GetoptError:
 		usage()
 		sys.exit(2)
@@ -148,6 +151,9 @@ def main(argv):
 			sys.exit(1)
                 if o in ("-x", "--expert"):
                         __EXPERT__ = True
+                if o in ("-v", "--version"):
+	                print('tcpping version %s') % (__VERSION__)
+                        sys.exit(0)
 
         if (__EXPERT__ and os.geteuid() != 0):
                 print('Expert mode requires root privileges.')
