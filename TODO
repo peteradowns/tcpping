@@ -1,0 +1,6 @@
+ TODO:
+    * add flag to output source ip and port for each connection
+    * microsecond timestamps on output line
+    * connect timeout flag
+    * companion tool for generating graphs from tcpping data
+    * realtime option in expert mode

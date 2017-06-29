@@ -1,0 +1,2 @@
+* Wed Jun 28 2017 Peter Downs <padowns@gmail.com> - 0.2.3
+- Add DNS lookup with each iteration to test if DNS introduces latency

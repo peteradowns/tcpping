@@ -8,19 +8,12 @@ compat-check: 2.6 2.7
 notes: expert mode is a work in progress, but not using it shouldn't affect
 normal user mode.
 
-TODO:
-    * add flag to output source ip and port for each connection
-    * microsecond timestamps on output line
-    * connect timeout flag
-    * companion tool for generating graphs from tcpping data
-    * realtime option in expert mode
-
 NOTES:
     * Modified to ensure a DNS lookup is done every time
 '''
 
 __AUTHOR__ = 'Peter Downs <padowns@gmail.com>'
-__VERSION__ = '0.02.03'
+__VERSION__ = '0.2.3'
 __DATE__ = '2016-02-26'
 
 import platform
